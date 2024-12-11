@@ -26,4 +26,34 @@ class BookCopies(Base):
 
     copy_id = Column(Integer, primary_key=True, autoincrement=True)
     book_id = Column(Integer, ForeignKey('Books_List.book_id'), nullable=False)
-    status = Column(Integer, nullable=False) #0 - wycofana, 1 - dostępna, 2 - wyp.
+    status = Column(Integer, nullable=False) #0 - wycofana, 1 - dostępna, 2 - wyp., 3 - zarezerwowana
+
+class Reservation_item(Base):
+    __tablename__ = 'reservation_item'
+
+    reservation_item_id = Column(Integer, primary_key=True, autoincrement=True)
+    reservation_id = Column(Integer, ForeignKey('Reservations.reservation_id'), nullable=False)
+    copy_id = Column(Integer, ForeignKey('Books_Copies.copy_id'), nullable=False)
+
+class Reservation(Base):
+    __tablename__ = 'Reservations'
+
+    reservation_id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey('Users.user_id'), nullable=False)
+    reservation_date = Column(Date, nullable=False)
+
+class Loan_item(Base):
+    __tablename__ = 'Loans_item'
+
+    loan_item_id = Column(Integer, primary_key=True, autoincrement=True)
+    loan_id = Column(Integer, ForeignKey('Loans.loan_id'), nullable=False)
+    copy_id = Column(Integer, ForeignKey('Books_Copies.copy_id'), nullable=False)
+
+class Loan(Base):
+    __tablename__ = 'Loans'
+
+    loan_id = Column(Integer, primary_key=True, autoincrement=True)
+    Reader_user_id = Column(Integer, ForeignKey('Users.user_id'), nullable=False)
+    Librarian_user_id = Column(Integer, ForeignKey('Users.user_id'), nullable=False)
+    loan_date = Column(Date, nullable=False)
+    return_date = Column(Date, nullable=True)
