@@ -2,7 +2,7 @@ from flask import request, jsonify, Blueprint, g
 from definitions import *
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy.orm import aliased
-from sqlalchemy import case, and_
+from sqlalchemy import case, and_, tuple_
 from datetime import datetime, timedelta
 
 routes_blueprint = Blueprint('routes', __name__)
@@ -133,6 +133,7 @@ def deleteBook():
     return jsonify({'message': 'Book deleted successfully'}), 200
 
 @routes_blueprint.post("/reserveBook")
+@routes_blueprint.post("/reserveBook")
 def reserveBook():
     data = request.get_json()
     print(data)
@@ -140,33 +141,57 @@ def reserveBook():
 
     username = data['username']
 
-    user = db.query(User).filter(User.username==username).first()
+    user = db.query(User).filter(User.username == username).first()
     if not user:
         return jsonify({'error': 'User not found'}), 404
 
     user_id = user.user_id
     current_date = datetime.today()
-    reservation_date = current_date + timedelta(days = 8)
-    reservation = Reservation(user_id = user_id, reservation_date = reservation_date)
-    db.add(reservation)
-    db.commit()
-    reservation_id = db.query(Reservation).filter(Reservation.user_id == user_id).order_by(Reservation.reservation_id.desc()).first().reservation_id
+    reservation_date = current_date + timedelta(days=8)
+
+    reserved_books = []
+
     books = data['books']
+
     for book in books:
         title = book['title']
         author = book['author']
 
-        book = db.query(BookList).filter(BookList.author == author, BookList.title == title).first()
-        copy = db.query(BookCopies).filter((BookCopies.book_id == book.book_id) & (BookCopies.status == 1)).first()
+        book_entry = db.query(BookList).filter(BookList.author == author, BookList.title == title).first()
+        if not book_entry:
+            continue
+
+        copy = db.query(BookCopies).filter(
+            (BookCopies.book_id == book_entry.book_id) & (BookCopies.status == 1)).first()
         if not copy:
             continue
 
-        copy_id = copy.copy_id
-        reservation_item = Reservation_item(reservation_id = reservation_id, copy_id = copy_id)
+        existing_reservation_item = db.query(Reservation_item).filter(Reservation_item.copy_id == copy.copy_id).first()
+        if existing_reservation_item:
+            continue
+
+        reserved_books.append(copy.copy_id)  # Track the reserved copy
+
+    if not reserved_books:
+        return jsonify({'error': 'None of the selected books are available for reservation'}), 400
+
+    reservation = Reservation(user_id=user_id, reservation_date=reservation_date)
+    db.add(reservation)
+    db.commit()
+
+    reservation_id = db.query(Reservation).filter(Reservation.user_id == user_id).order_by(
+        Reservation.reservation_id.desc()).first().reservation_id
+
+    for copy_id in reserved_books:
+        reservation_item = Reservation_item(reservation_id=reservation_id, copy_id=copy_id)
         db.add(reservation_item)
+
         db.query(BookCopies).filter(BookCopies.copy_id == copy_id).update({BookCopies.status: 3})
-        db.commit()
-    return jsonify({'message': 'Book reserved successfully'}), 200
+
+    db.commit()
+
+    return jsonify({'message': 'Books reserved successfully'}), 200
+
 
 @routes_blueprint.post('/loanBook')
 def loanBook():
@@ -176,42 +201,122 @@ def loanBook():
 
     librarian_username = data['librarian_username']
     user_username = data['user_username']
-    user1 = db.query(User).filter(User.username==user_username).first()
-    user2 = db.query(User).filter(User.username==librarian_username).first()
+
+    user1 = db.query(User).filter(User.username == user_username).first()
+    user2 = db.query(User).filter(User.username == librarian_username).first()
+
     if not user1 or not user2:
         return jsonify({'error': 'User not found'}), 404
+
     user1_id = user1.user_id
     user2_id = user2.user_id
-    current_date = datetime.today()
-    return_date = current_date + timedelta(days = 30)
-    loan = Loan(Reader_user_id = user1_id, Librarian_user_id = user2_id, loan_date = current_date, return_date = return_date)
-    db.add(loan)
-    db.commit()
-    loan_id = db.query(Loan).filter(Loan.Reader_user_id == user1_id).order_by(Loan.loan_id.desc()).first().loan_id
+
     books = data['books']
+    unavailable_books = []
+    borrowable_books = []
+
+    # Check if books can be borrowed
     for book in books:
         title = book['title']
         author = book['author']
-        book = db.query(BookList).filter(BookList.author == author, BookList.title == title).first()
-        copies = db.query(BookCopies).filter((BookCopies.book_id == book.book_id)).all()
 
-        copy = (db.query(BookCopies)
-                .join(Reservation_item, BookCopies.copy_id == Reservation_item.copy_id, isouter=True)
-                .join(Reservation, Reservation_item.reservation_id == Reservation.reservation_id, isouter=True)
-                .filter((BookCopies.book_id == book.book_id) &
-                        ((BookCopies.status == 1) |
-                         ((BookCopies.status == 3) &
-                          (Reservation.user_id == user1_id)))
-                        )
-                .first())
+        book_record = db.query(BookList).filter(BookList.author == author, BookList.title == title).first()
 
-        if not copy:
+        if not book_record:
+            unavailable_books.append({'title': title, 'author': author, 'reason': 'Book not found'})
             continue
 
-        copy_id = copy.copy_id
+        copy = (
+            db.query(BookCopies)
+            .join(Reservation_item, BookCopies.copy_id == Reservation_item.copy_id, isouter=True)
+            .join(Reservation, Reservation_item.reservation_id == Reservation.reservation_id, isouter=True)
+            .filter((BookCopies.book_id == book_record.book_id) &
+                    ((BookCopies.status == 1) |
+                     ((BookCopies.status == 3) &
+                      (Reservation.user_id == user1_id))))
+            .first()
+        )
 
-        loan_item = Loan_item(loan_id = loan_id, copy_id = copy_id)
+        if not copy:
+            unavailable_books.append({'title': title, 'author': author, 'reason': 'No available copies'})
+            continue
+
+        borrowable_books.append({'book': book_record, 'copy': copy})
+
+    if unavailable_books:
+        return jsonify({'error': 'Some books cannot be borrowed', 'details': unavailable_books}), 400
+
+    # Proceed with borrowing
+    current_date = datetime.today()
+    return_date = current_date + timedelta(days=30)
+
+    loan = Loan(
+        Reader_user_id=user1_id,
+        Librarian_user_id=user2_id,
+        loan_date=current_date,
+        expected_return_date=return_date
+    )
+
+    db.add(loan)
+    db.commit()
+
+    loan_id = loan.loan_id
+
+    for borrowable in borrowable_books:
+        book = borrowable['book']
+        copy = borrowable['copy']
+
+        loan_item = Loan_item(loan_id=loan_id, copy_id=copy.copy_id)
         db.add(loan_item)
-        db.query(BookCopies).filter(BookCopies.copy_id == copy_id).update({BookCopies.status: 2})
-        db.commit()
-    return jsonify({'message': 'Book loaned successfully'}), 200
+
+        db.query(BookCopies).filter(BookCopies.copy_id == copy.copy_id).update({BookCopies.status: 2})
+
+    db.commit()
+
+    return jsonify({'message': 'Books loaned successfully'}), 200
+
+@routes_blueprint.post('/returnBook')
+def returnBook():
+    data = request.get_json()
+    print(data)
+    db = g.db
+
+    username = data["username"]
+    user = db.query(User).filter(User.username == username).first()
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+
+    current_date = datetime.today()
+    user_id = user.user_id
+
+    books = data['books']
+    books_subquery = (
+        db.query(BookList.book_id)
+        .filter(
+            tuple_(BookList.title, BookList.author).in_(
+                [(book['title'], book['author']) for book in books]
+            )
+        )
+        .subquery()
+    )
+
+    user_active_loan = (((((db.query(Loan, Loan_item, BookCopies, BookList)
+                         .join(Loan_item, Loan.loan_id == Loan_item.loan_id))
+                         .join(BookCopies, Loan_item.copy_id == BookCopies.copy_id))
+                         .join(BookList, BookCopies.book_id == BookList.book_id))
+                          .filter(Loan.Reader_user_id == user_id,
+                                  Loan.actual_return_date == None,
+                                  BookCopies.book_id.in_(books_subquery)))
+                         .first())
+
+    if not user_active_loan:
+        return jsonify({'error': 'User has no active loan'}), 400
+
+    # return jsonify({'message': 'Books returned successfully'}), 200
+
+
+
+    # 1. username
+    # 2. książki[] -> title, author -> Books_Copies -> status -> czy są wszystkie
+    # 3. return_date < todays_date-> (fine) -> Loans -> return_date
+    # 4. fine

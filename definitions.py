@@ -56,4 +56,5 @@ class Loan(Base):
     Reader_user_id = Column(Integer, ForeignKey('Users.user_id'), nullable=False)
     Librarian_user_id = Column(Integer, ForeignKey('Users.user_id'), nullable=False)
     loan_date = Column(Date, nullable=False)
-    return_date = Column(Date, nullable=True)
+    expected_return_date = Column(Date, nullable=False)
+    actual_return_date = Column(Date, nullable=True)
