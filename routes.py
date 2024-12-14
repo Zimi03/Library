@@ -4,7 +4,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy.orm import aliased
 from sqlalchemy import case, and_, tuple_
 from datetime import datetime, timedelta
-from helpers import get_user_fines
+from helpers import get_user_unpaid_fines
 routes_blueprint = Blueprint('routes', __name__)
 
 @routes_blueprint.route('/')
@@ -201,7 +201,7 @@ def loanBook():
     librarian_username = data['librarian_username']
     user_username = data['user_username']
 
-    user_fines=get_user_fines(db, user_username)
+    user_fines=get_user_unpaid_fines(db, user_username)
 
     for fine in user_fines:
         if not fine["paid"]:
@@ -303,7 +303,7 @@ def get_fines():
     username = request.args.get('username')
 
     user = db.query(User).filter(User.username == username).first()
-    fines = get_user_fines(db, username)
+    fines = get_user_unpaid_fines(db, username)
     if not fines:
         return jsonify({'error': 'No fines found'}), 404
     else:
@@ -318,7 +318,7 @@ def pay_fine():
 
     username = data['username']
 
-    user_fines=get_user_fines(db, username)
+    user_fines=get_user_unpaid_fines(db, username)
     if not user_fines:
         return jsonify({'error': 'No fines found'}), 404
     fine_id= None

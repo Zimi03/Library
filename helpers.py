@@ -1,7 +1,7 @@
 from definitions import User, Fines, Loans
 from flask import jsonify
 
-def get_user_fines(db, username):
+def get_user_unpaid_fines(db, username):
         # Query the user by username
         user = db.query(User).filter(User.username == username).first()
 
@@ -19,7 +19,6 @@ def get_user_fines(db, username):
             .filter((Loans.Reader_user_id == user_id)&(Fines.paid == False))
             .all()
         )
-
         fines_list = [
             {
                 "username": fine[2],
