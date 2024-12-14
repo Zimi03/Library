@@ -118,9 +118,19 @@ def getBooks():
 
     books = query.all()
 
-    print(books)
+    books_data = [
+        {
+            'title': book[0],  # Book title
+            'author': book[1],  # Book author
+            'genre': book[2],  # Book genre
+            'status': book[3]  # Availability status
+        }
+        for book in books
+    ]
 
-    return ""
+    print(books)
+    # Return the data as a JSON response
+    return jsonify(books_data)
 
 @routes_blueprint.post('/deleteBook')
 def deleteBook():
@@ -164,10 +174,6 @@ def reserveBook():
             (BookCopies.book_id == book_entry.book_id) & (BookCopies.status == 1)).first()
         if not copy:
             continue
-
-        # existing_reservation_item = db.query(Reservation_item).filter(Reservation_item.copy_id == copy.copy_id).first()
-        # if existing_reservation_item:
-        #     continue
 
         reserved_books.append(copy.copy_id)  # Track the reserved copy
 
@@ -224,7 +230,7 @@ def loanBook():
         return jsonify({'error': 'Book not found'}), 404
 
     copy = (
-        db.query(BookCopies)
+        db.query(BookCopies,Reservation.reservation_id)
         .join(Reservation_item, BookCopies.copy_id == Reservation_item.copy_id, isouter=True)
         .join(Reservation, Reservation_item.reservation_id == Reservation.reservation_id, isouter=True)
         .filter((BookCopies.book_id == book_record.book_id) &
@@ -306,9 +312,10 @@ def get_fines():
     fines = get_user_unpaid_fines(db, username)
     if not fines:
         return jsonify({'error': 'No fines found'}), 404
-    else:
-        print(fines)
-        return jsonify({'fines': fines}), 200
+
+
+    print(fines)
+    return jsonify({'fines': fines}), 200
 
 @routes_blueprint.post('/payFine')
 def pay_fine():
@@ -331,3 +338,79 @@ def pay_fine():
     db.query(Fines).filter(Fines.fine_id == fine_id).update({Fines.paid: True})
     db.commit()
     return jsonify({'message': 'Fine paid successfully'}), 200
+
+
+# Endpoint to get loans by username (corrected for fetching book title)
+@routes_blueprint.get('/userLoans')
+def get_user_loans():
+    db = g.db
+    # Get the username from query parameters
+    username = request.args.get('username')
+    if not username:
+        return jsonify({'error': 'Username is required'}), 400
+
+    # Query the User table to get the user_id associated with the username
+    user = db.query(User).filter(User.username == username).first()
+
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+
+    # Now we have the user_id, and we can use it to query the Loans table
+    user_id = user.user_id
+
+    # Query the Loans table to fetch loans associated with the user
+    loans = (db.query(
+        Loans, BookCopies, User.username, BookList.title, Fines.amount, Fines.paid)
+         .join(BookCopies, Loans.copy_id == BookCopies.copy_id)
+         .join(BookList, BookCopies.book_id == BookList.book_id)
+         .join(User, Loans.Reader_user_id == User.user_id)
+         .join(Fines, Loans.loan_id == Fines.loan_id, isouter=True)
+         .filter(Loans.Reader_user_id == user_id)
+         .all())
+
+    # Convert results to a structured format (list of dictionaries) without IDs
+    loans_data = [
+        {
+            'book_title': loan[3],  # Get the book title from the BookList table
+            'loan_date': loan[0].loan_date,
+            'expected_return_date': loan[0].expected_return_date,
+            'actual_return_date': loan[0].actual_return_date,
+            'username': loan[2],
+            'fine_amount': loan[4] if loan[4] else None,  # Fines might be None
+            'fine_paid': loan[5] if loan[5] else None  # Fines might be None
+        }
+        for loan in loans
+    ]
+
+    # Return the data as a JSON response
+    return jsonify(loans_data)
+
+@routes_blueprint.get('/userReservations')
+def get_user_reservations():
+    db = g.db
+    username = request.args.get('username')
+    if not username:
+        return jsonify({'error': 'Username is required'}), 400
+    user = db.query(User).filter(User.username == username).first()
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+    user_id = user.user_id
+    reservations = (db.query(User.username, Reservation, Reservation_item, BookCopies, BookList.title, BookList.author)
+                    .join(Reservation, Reservation.user_id == User.user_id)
+                    .join(Reservation_item, Reservation_item.reservation_id == Reservation.reservation_id)
+                    .join(BookCopies, BookCopies.copy_id == Reservation_item.copy_id)
+                    .join(BookList, BookCopies.book_id == BookList.book_id)
+                    .all()
+    )
+
+    reservations_data = [
+        {
+        'username':reservation[0],
+        'reservation_date':reservation[1].reservation_date,
+        'title': reservation[4],
+        'author':reservation[5]
+        }for reservation in reservations
+    ]
+
+    print(reservations_data)
+    return jsonify(reservations_data)
