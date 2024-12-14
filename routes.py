@@ -218,6 +218,10 @@ def deleteBook():
         return jsonify({'error': 'You are not authorized'}), 400
 
     copy_id = data['copy_id']
+    copy_status = db.query(BookCopies).filter(BookCopies.copy_id==copy_id).first().status
+    if copy_status == 0:
+        return jsonify({'error': 'Book is already deleted'}), 400
+
     db.query(BookCopies).filter(BookCopies.copy_id==copy_id).update({BookCopies.status: 0})
     db.commit()
     return jsonify({'message': 'Book deleted successfully'}), 200
@@ -273,7 +277,10 @@ def reserveBook():
 
         db.query(BookCopies).filter(BookCopies.copy_id == copy_id).update({BookCopies.status: 3})
 
+
     db.commit()
+    if len(books) != len(reserved_books):
+        return jsonify({'error': 'Some of the selected books are not available for reservation, part of reservation made'}), 400
 
     return jsonify({'message': 'Books reserved successfully'}), 200
 
