@@ -4,12 +4,12 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy.orm import aliased
 from sqlalchemy import case, and_, tuple_
 from datetime import datetime, timedelta
-
+from helpers import get_user_fines
 routes_blueprint = Blueprint('routes', __name__)
 
 @routes_blueprint.route('/')
 def hello_world():  # put application's code here
-    return 'Hello World!'
+    return 'Super fajna aplikacja do obslugi biblioteki'
 
 @routes_blueprint.post('/users')
 def registerUser():
@@ -133,7 +133,6 @@ def deleteBook():
     return jsonify({'message': 'Book deleted successfully'}), 200
 
 @routes_blueprint.post("/reserveBook")
-@routes_blueprint.post("/reserveBook")
 def reserveBook():
     data = request.get_json()
     print(data)
@@ -166,9 +165,9 @@ def reserveBook():
         if not copy:
             continue
 
-        existing_reservation_item = db.query(Reservation_item).filter(Reservation_item.copy_id == copy.copy_id).first()
-        if existing_reservation_item:
-            continue
+        # existing_reservation_item = db.query(Reservation_item).filter(Reservation_item.copy_id == copy.copy_id).first()
+        # if existing_reservation_item:
+        #     continue
 
         reserved_books.append(copy.copy_id)  # Track the reserved copy
 
@@ -202,6 +201,12 @@ def loanBook():
     librarian_username = data['librarian_username']
     user_username = data['user_username']
 
+    user_fines=get_user_fines(db, user_username)
+
+    for fine in user_fines:
+        if not fine["paid"]:
+            return jsonify({'error': 'Fine not paid'}), 404
+
     user1 = db.query(User).filter(User.username == user_username).first()
     user2 = db.query(User).filter(User.username == librarian_username).first()
 
@@ -211,69 +216,38 @@ def loanBook():
     user1_id = user1.user_id
     user2_id = user2.user_id
 
-    books = data['books']
-    unavailable_books = []
-    borrowable_books = []
+    title = data['title']
+    author = data['author']
 
-    # Check if books can be borrowed
-    for book in books:
-        title = book['title']
-        author = book['author']
+    book_record = db.query(BookList).filter(BookList.author == author, BookList.title == title).first()
+    if not book_record:
+        return jsonify({'error': 'Book not found'}), 404
 
-        book_record = db.query(BookList).filter(BookList.author == author, BookList.title == title).first()
-
-        if not book_record:
-            unavailable_books.append({'title': title, 'author': author, 'reason': 'Book not found'})
-            continue
-
-        copy = (
-            db.query(BookCopies)
-            .join(Reservation_item, BookCopies.copy_id == Reservation_item.copy_id, isouter=True)
-            .join(Reservation, Reservation_item.reservation_id == Reservation.reservation_id, isouter=True)
-            .filter((BookCopies.book_id == book_record.book_id) &
-                    ((BookCopies.status == 1) |
-                     ((BookCopies.status == 3) &
-                      (Reservation.user_id == user1_id))))
-            .first()
-        )
-
-        if not copy:
-            unavailable_books.append({'title': title, 'author': author, 'reason': 'No available copies'})
-            continue
-
-        borrowable_books.append({'book': book_record, 'copy': copy})
-
-    if unavailable_books:
-        return jsonify({'error': 'Some books cannot be borrowed', 'details': unavailable_books}), 400
-
-    # Proceed with borrowing
-    current_date = datetime.today()
-    return_date = current_date + timedelta(days=30)
-
-    loan = Loan(
-        Reader_user_id=user1_id,
-        Librarian_user_id=user2_id,
-        loan_date=current_date,
-        expected_return_date=return_date
+    copy = (
+        db.query(BookCopies)
+        .join(Reservation_item, BookCopies.copy_id == Reservation_item.copy_id, isouter=True)
+        .join(Reservation, Reservation_item.reservation_id == Reservation.reservation_id, isouter=True)
+        .filter((BookCopies.book_id == book_record.book_id) &
+                ((BookCopies.status == 1) |
+                 ((BookCopies.status == 3) &
+                  (Reservation.user_id == user1_id))))
+        .first()
     )
+
+    if not copy:
+        return jsonify({'error': 'Book not available for loan'}), 404
+
+    loan = Loans(Reader_user_id=user1_id,
+                Librarian_user_id=user2_id,
+                copy_id=copy.copy_id,
+                loan_date=datetime.today(),
+                expected_return_date=datetime.today()+timedelta(days=30))
+
+    db.query(BookCopies).filter(BookCopies.copy_id == copy.copy_id).update({BookCopies.status: 2})
 
     db.add(loan)
     db.commit()
-
-    loan_id = loan.loan_id
-
-    for borrowable in borrowable_books:
-        book = borrowable['book']
-        copy = borrowable['copy']
-
-        loan_item = Loan_item(loan_id=loan_id, copy_id=copy.copy_id)
-        db.add(loan_item)
-
-        db.query(BookCopies).filter(BookCopies.copy_id == copy.copy_id).update({BookCopies.status: 2})
-
-    db.commit()
-
-    return jsonify({'message': 'Books loaned successfully'}), 200
+    return jsonify({'message': 'Book loaned successfully'}), 200
 
 @routes_blueprint.post('/returnBook')
 def returnBook():
@@ -281,42 +255,79 @@ def returnBook():
     print(data)
     db = g.db
 
-    username = data["username"]
+    username = data['username']
+    title = data['title']
+    author = data['author']
+
+    book_record = db.query(BookList).filter(BookList.author == author, BookList.title == title).first()
+    if not book_record:
+        return jsonify({'error': 'Book not found'}), 404
     user = db.query(User).filter(User.username == username).first()
     if not user:
         return jsonify({'error': 'User not found'}), 404
+    user1_id = user.user_id
+    book_id = book_record.book_id
 
-    current_date = datetime.today()
-    user_id = user.user_id
-
-    books = data['books']
-    books_subquery = (
-        db.query(BookList.book_id)
-        .filter(
-            tuple_(BookList.title, BookList.author).in_(
-                [(book['title'], book['author']) for book in books]
+    loan = (
+            db.query(Loans)
+            .join(BookCopies, BookCopies.copy_id == Loans.copy_id, isouter=True)
+            .filter((BookCopies.book_id == book_id) &
+                    (Loans.Reader_user_id == user1_id) &
+                    (BookCopies.copy_id == Loans.copy_id) &
+                    (Loans.actual_return_date == None)
+                    )
+                    .first()
             )
-        )
-        .subquery()
-    )
 
-    user_active_loan = (((((db.query(Loan, Loan_item, BookCopies, BookList)
-                         .join(Loan_item, Loan.loan_id == Loan_item.loan_id))
-                         .join(BookCopies, Loan_item.copy_id == BookCopies.copy_id))
-                         .join(BookList, BookCopies.book_id == BookList.book_id))
-                          .filter(Loan.Reader_user_id == user_id,
-                                  Loan.actual_return_date == None,
-                                  BookCopies.book_id.in_(books_subquery)))
-                         .first())
+    if not loan:
+        return jsonify({'error': 'loan not found'}), 404
 
-    if not user_active_loan:
-        return jsonify({'error': 'User has no active loan'}), 400
+    copy_id = loan.copy_id
+    loan_id = loan.loan_id
+    if datetime.today().date() <= loan.expected_return_date:
+        fine_amount = abs((datetime.today().date() - loan.expected_return_date).days) * 0.3
+        fine = Fines(loan_id = loan_id,
+                    amount = fine_amount,
+                    paid = False
+                    )
 
-    # return jsonify({'message': 'Books returned successfully'}), 200
+        db.add(fine)
 
+    db.query(BookCopies).filter(BookCopies.copy_id == copy_id).update({BookCopies.status: 1})
+    db.query(Loans).filter(Loans.loan_id == loan_id).update({Loans.actual_return_date: datetime.today()})
+    db.commit()
+    return jsonify({'message': 'Book returned successfully'}), 200
+@routes_blueprint.get('/getFines')
+def get_fines():
+    db = g.db
+    username = request.args.get('username')
 
+    user = db.query(User).filter(User.username == username).first()
+    fines = get_user_fines(db, username)
+    if not fines:
+        return jsonify({'error': 'No fines found'}), 404
+    else:
+        print(fines)
+        return jsonify({'fines': fines}), 200
 
-    # 1. username
-    # 2. książki[] -> title, author -> Books_Copies -> status -> czy są wszystkie
-    # 3. return_date < todays_date-> (fine) -> Loans -> return_date
-    # 4. fine
+@routes_blueprint.post('/payFine')
+def pay_fine():
+    data = request.get_json()
+    print(data)
+    db = g.db
+
+    username = data['username']
+
+    user_fines=get_user_fines(db, username)
+    if not user_fines:
+        return jsonify({'error': 'No fines found'}), 404
+    fine_id= None
+    for fine in user_fines:
+        if not fine["paid"]:
+            fine_id = fine["fine_id"]
+    if not fine_id:
+        return jsonify({'error': 'No unpaid fines found'}), 404
+
+    db.query(Fines).filter(Fines.fine_id == fine_id).update({Fines.paid: True})
+    db.commit()
+    return jsonify({'message': 'Fine paid successfully'}), 200

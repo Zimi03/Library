@@ -42,19 +42,21 @@ class Reservation(Base):
     user_id = Column(Integer, ForeignKey('Users.user_id'), nullable=False)
     reservation_date = Column(Date, nullable=False)
 
-class Loan_item(Base):
-    __tablename__ = 'Loans_item'
-
-    loan_item_id = Column(Integer, primary_key=True, autoincrement=True)
-    loan_id = Column(Integer, ForeignKey('Loans.loan_id'), nullable=False)
-    copy_id = Column(Integer, ForeignKey('Books_Copies.copy_id'), nullable=False)
-
-class Loan(Base):
+class Loans(Base):
     __tablename__ = 'Loans'
 
     loan_id = Column(Integer, primary_key=True, autoincrement=True)
     Reader_user_id = Column(Integer, ForeignKey('Users.user_id'), nullable=False)
     Librarian_user_id = Column(Integer, ForeignKey('Users.user_id'), nullable=False)
     loan_date = Column(Date, nullable=False)
+    copy_id = Column(Integer, ForeignKey('Books_Copies.copy_id'), nullable=False)
     expected_return_date = Column(Date, nullable=False)
     actual_return_date = Column(Date, nullable=True)
+
+class Fines(Base):
+    __tablename__ = 'Fines'
+
+    fine_id = Column(Integer, primary_key=True, autoincrement=True)
+    loan_id = Column(Integer, ForeignKey('Loans.loan_id'), nullable=False)
+    amount = Column(DECIMAL(10,2), nullable=False)
+    paid = Column(Boolean, nullable=False)
