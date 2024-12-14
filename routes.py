@@ -11,7 +11,7 @@ routes_blueprint = Blueprint('routes', __name__)
 def hello_world():  # put application's code here
     return 'Super fajna aplikacja do obslugi biblioteki'
 
-@routes_blueprint.post('/users')
+@routes_blueprint.post('/adduser')
 def registerUser():
     data = request.get_json()
     print(data)
@@ -32,8 +32,53 @@ def registerUser():
     db.add(new_user)
     db.commit()
 
-    return '', 200
+    return jsonify('User added'), 200
 
+@routes_blueprint.post('/addLibrarian')
+def registerLibrarian():
+    data = request.get_json()
+    print(data)
+
+    if not data:
+        return jsonify({'error' : 'No data provided'}), 400
+
+    db = g.db
+    existing_user = db.query(User).filter((User.username == data['username']) | (User.email == data['email'])).first()
+    if existing_user:
+        return jsonify({'error' : 'User already exists'}), 400
+    hashed_password = generate_password_hash(data['password'], method='pbkdf2:sha256', salt_length=8)
+    new_user = User(username=data['username'],
+                    password=hashed_password,
+                    role=1,
+                    email=data['email'],
+                    phone_number=data['phone_number'])
+    db.add(new_user)
+    db.commit()
+
+    return jsonify('User added'), 200
+
+@routes_blueprint.post('/addAdmin')
+def registerAdmin():
+    data = request.get_json()
+    print(data)
+
+    if not data:
+        return jsonify({'error' : 'No data provided'}), 400
+
+    db = g.db
+    existing_user = db.query(User).filter((User.username == data['username']) | (User.email == data['email'])).first()
+    if existing_user:
+        return jsonify({'error' : 'User already exists'}), 400
+    hashed_password = generate_password_hash(data['password'], method='pbkdf2:sha256', salt_length=8)
+    new_user = User(username=data['username'],
+                    password=hashed_password,
+                    role=2,
+                    email=data['email'],
+                    phone_number=data['phone_number'])
+    db.add(new_user)
+    db.commit()
+
+    return jsonify('User added'), 200
 
 @routes_blueprint.post('/login')
 def login():
@@ -212,6 +257,9 @@ def loanBook():
 
     user1 = db.query(User).filter(User.username == user_username).first()
     user2 = db.query(User).filter(User.username == librarian_username).first()
+
+    if user2.role != 1:
+        return jsonify({'error': 'Librarian not found'}), 404
 
     if not user1 or not user2:
         return jsonify({'error': 'User not found'}), 404
