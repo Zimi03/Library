@@ -400,6 +400,7 @@ def get_user_reservations():
                     .join(Reservation_item, Reservation_item.reservation_id == Reservation.reservation_id)
                     .join(BookCopies, BookCopies.copy_id == Reservation_item.copy_id)
                     .join(BookList, BookCopies.book_id == BookList.book_id)
+                    .filter(Reservation.user_id == user_id)
                     .all()
     )
 
