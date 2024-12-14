@@ -1,4 +1,6 @@
-from flask import request, jsonify, Blueprint, g
+from flask import request, jsonify, Blueprint, g, session
+
+import app
 from definitions import *
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy.orm import aliased
@@ -11,7 +13,7 @@ routes_blueprint = Blueprint('routes', __name__)
 def hello_world():  # put application's code here
     return 'Super fajna aplikacja do obslugi biblioteki'
 
-@routes_blueprint.post('/adduser')
+@routes_blueprint.post('/addUser')
 def registerUser():
     data = request.get_json()
     print(data)
@@ -42,7 +44,17 @@ def registerLibrarian():
     if not data:
         return jsonify({'error' : 'No data provided'}), 400
 
+    if "user_id" not in session:
+        return jsonify({'error': 'You are not authorized'}), 400
+
     db = g.db
+
+    user_id = session["user_id"]
+    user = db.query(User).filter(User.user_id == user_id).first()
+
+    if user.role != 2:
+        return jsonify({'error': 'You are not authorized'}), 400
+
     existing_user = db.query(User).filter((User.username == data['username']) | (User.email == data['email'])).first()
     if existing_user:
         return jsonify({'error' : 'User already exists'}), 400
@@ -55,7 +67,7 @@ def registerLibrarian():
     db.add(new_user)
     db.commit()
 
-    return jsonify('User added'), 200
+    return jsonify('Librarian added'), 200
 
 @routes_blueprint.post('/addAdmin')
 def registerAdmin():
@@ -66,6 +78,16 @@ def registerAdmin():
         return jsonify({'error' : 'No data provided'}), 400
 
     db = g.db
+
+    if "user_id" not in session:
+        return jsonify({'error' : 'You are not authorized'}), 400
+
+    user_id = session["user_id"]
+    user = db.query(User).filter(User.user_id == user_id).first()
+
+    if user.role != 2:
+        return jsonify({'error' : 'You are not authorized'}), 400
+
     existing_user = db.query(User).filter((User.username == data['username']) | (User.email == data['email'])).first()
     if existing_user:
         return jsonify({'error' : 'User already exists'}), 400
@@ -78,7 +100,7 @@ def registerAdmin():
     db.add(new_user)
     db.commit()
 
-    return jsonify('User added'), 200
+    return jsonify('Admin added'), 200
 
 @routes_blueprint.post('/login')
 def login():
@@ -99,6 +121,9 @@ def login():
     if not check_password_hash(user.password, data['password']):
         return jsonify({'error': 'Invalid password'}), 401
 
+    user_id=user.user_id
+    session["user_id"] = user.user_id
+
     # If password matches, return a success message or token
     return jsonify({'message': 'Login successful'}), 200
 
@@ -106,8 +131,14 @@ def login():
 def addBook():
     data = request.get_json()
     print(data)
-
     db = g.db
+    if "user_id" not in session:
+        return jsonify({'error': 'You are not authorized'}), 400
+
+    user = db.query(User).filter(User.user_id == session["user_id"]).first()
+    if user.role != 1:
+        return jsonify({'error': 'You are not authorized'}), 400
+
     existing_book = db.query(BookList).filter((BookList.title == data['title']) & (BookList.author == data['author'])).first()
 
     new_book = None
@@ -179,6 +210,13 @@ def deleteBook():
     data = request.get_json()
     print(data)
     db = g.db
+    if "user_id" not in session:
+        return jsonify({'error': 'You are not authorized'}), 400
+
+    user = db.query(User).filter(User.user_id == session["user_id"]).first()
+    if user.role != 1:
+        return jsonify({'error': 'You are not authorized'}), 400
+
     copy_id = data['copy_id']
     db.query(BookCopies).filter(BookCopies.copy_id==copy_id).update({BookCopies.status: 0})
     db.commit()
@@ -246,23 +284,23 @@ def loanBook():
     print(data)
     db = g.db
 
-    librarian_username = data['librarian_username']
+    if "user_id" not in session:
+        return jsonify({'error': 'You are not authorized'}), 400
+
     user_username = data['user_username']
-
     user_fines=get_user_unpaid_fines(db, user_username)
-
     for fine in user_fines:
         if not fine["paid"]:
             return jsonify({'error': 'Fine not paid'}), 404
 
     user1 = db.query(User).filter(User.username == user_username).first()
-    user2 = db.query(User).filter(User.username == librarian_username).first()
-
-    if user2.role != 1:
-        return jsonify({'error': 'Librarian not found'}), 404
+    user2 = db.query(User).filter(User.user_id==session["user_id"]).first()
 
     if not user1 or not user2:
         return jsonify({'error': 'User not found'}), 404
+
+    if user2.role != 1:
+        return jsonify({'error': 'You are not authorized'}), 400
 
     user1_id = user1.user_id
     user2_id = user2.user_id
@@ -289,12 +327,12 @@ def loanBook():
         return jsonify({'error': 'Book not available for loan'}), 404
 
     loan = Loans(Reader_user_id=user1_id,
-                Librarian_user_id=user2_id,
-                copy_id=copy.copy_id,
-                loan_date=datetime.today(),
-                expected_return_date=datetime.today()+timedelta(days=30))
+                 Librarian_user_id=user2_id,
+                 copy_id=copy[0].copy_id,
+                 loan_date=datetime.today(),
+                 expected_return_date=datetime.today()+timedelta(days=30))
 
-    db.query(BookCopies).filter(BookCopies.copy_id == copy.copy_id).update({BookCopies.status: 2})
+    db.query(BookCopies).filter(BookCopies.copy_id == copy[0].copy_id).update({BookCopies.status: 2})
 
     db.add(loan)
     db.commit()
@@ -305,6 +343,13 @@ def returnBook():
     data = request.get_json()
     print(data)
     db = g.db
+
+    if "user_id" not in session:
+        return jsonify({'error': 'You are not authorized'}), 400
+
+    user = db.query(User).filter(User.user_id == session["user_id"]).first()
+    if user.role != 1:
+        return jsonify({'error': 'You are not authorized'}), 400
 
     username = data['username']
     title = data['title']
@@ -335,7 +380,7 @@ def returnBook():
 
     copy_id = loan.copy_id
     loan_id = loan.loan_id
-    if datetime.today().date() <= loan.expected_return_date:
+    if datetime.today().date() > loan.expected_return_date:
         fine_amount = abs((datetime.today().date() - loan.expected_return_date).days) * 0.3
         fine = Fines(loan_id = loan_id,
                     amount = fine_amount,
@@ -368,6 +413,13 @@ def pay_fine():
     print(data)
     db = g.db
 
+    if "user_id" not in session:
+        return jsonify({'error': 'You are not authorized'}), 400
+
+    user = db.query(User).filter(User.user_id == session["user_id"]).first()
+    if user.role != 1:
+        return jsonify({'error': 'You are not authorized'}), 400
+
     username = data['username']
 
     user_fines=get_user_unpaid_fines(db, username)
@@ -387,7 +439,7 @@ def pay_fine():
 
 # Endpoint to get loans by username (corrected for fetching book title)
 @routes_blueprint.get('/userLoans')
-def get_user_loans():
+def getUserLoans():
     db = g.db
     # Get the username from query parameters
     username = request.args.get('username')
@@ -432,7 +484,7 @@ def get_user_loans():
     return jsonify(loans_data)
 
 @routes_blueprint.get('/userReservations')
-def get_user_reservations():
+def getUserReservations():
     db = g.db
     username = request.args.get('username')
     if not username:
@@ -461,3 +513,8 @@ def get_user_reservations():
 
     print(reservations_data)
     return jsonify(reservations_data)
+
+@routes_blueprint.post('/logout')
+def logout():
+   session.clear()
+   return jsonify({'message': 'Logout successful'}), 200

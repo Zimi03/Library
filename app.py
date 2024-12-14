@@ -15,7 +15,7 @@ database = 'Library'
 # Create engine and session
 engine = create_engine(f'mysql+pymysql://{username}:{password}@{host}/{database}')
 Session = sessionmaker(bind=engine)
-session = Session()
+session_alchemy = Session()
 
 # Set up metadata for the database structure
 metadata = MetaData()
@@ -25,18 +25,18 @@ for table_name in metadata.tables:
 
 # Flask application setup
 app = Flask(__name__)
-
+app.secret_key = "secret_key"
 def start_scheduler():
 
     timezone = pytz.utc
     scheduler = BackgroundScheduler(daemon=True)
-    scheduler.add_job(check_reservation_date, 'cron', hour=0, minute=0, args=[session], timezone=timezone)
+    scheduler.add_job(check_reservation_date, 'cron', hour=0, minute=0, args=[session_alchemy], timezone=timezone)
     scheduler.start()
     print("Scheduler started")
 
 @app.before_request
 def create_session():
-    g.db = session
+    g.db = session_alchemy
 
 @app.teardown_request
 def close_session(exception=None):
