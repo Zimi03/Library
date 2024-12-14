@@ -97,10 +97,7 @@ def getBooks():
                 (
                     db.query(book_copies.copy_id)
                     .filter(
-                        and_(
-                            book_copies.book_id == BookList.book_id,
-                            book_copies.status == 1
-                        )
+                        ((book_copies.book_id == BookList.book_id)&(book_copies.status == 1))
                     )
                     .exists(),
                     'dostępna'
@@ -360,7 +357,7 @@ def get_user_loans():
 
     # Query the Loans table to fetch loans associated with the user
     loans = (db.query(
-        Loans, BookCopies, User.username, BookList.title, Fines.amount, Fines.paid)
+        Loans, BookCopies, User.username, BookList.title, Fines.amount, Fines.paid, BookList.author)
          .join(BookCopies, Loans.copy_id == BookCopies.copy_id)
          .join(BookList, BookCopies.book_id == BookList.book_id)
          .join(User, Loans.Reader_user_id == User.user_id)
@@ -371,11 +368,12 @@ def get_user_loans():
     # Convert results to a structured format (list of dictionaries) without IDs
     loans_data = [
         {
-            'book_title': loan[3],  # Get the book title from the BookList table
+            'username': loan[2],
+            'book_title': loan[3],
+            'author':loan[6],
             'loan_date': loan[0].loan_date,
             'expected_return_date': loan[0].expected_return_date,
             'actual_return_date': loan[0].actual_return_date,
-            'username': loan[2],
             'fine_amount': loan[4] if loan[4] else None,  # Fines might be None
             'fine_paid': loan[5] if loan[5] else None  # Fines might be None
         }
