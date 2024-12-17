@@ -8,7 +8,7 @@ import pytz
 
 # Database connection details
 username = 'root'
-password = 'Kawilacak123'
+password = 'Projektnastudia12'
 host = 'localhost:3306'
 database = 'Library'
 
