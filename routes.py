@@ -127,7 +127,7 @@ def login():
     # If password matches, return a success message or token
     return jsonify({'message': 'Login successful'}), 200
 
-@routes_blueprint.post('/books')
+@routes_blueprint.post('/addBook')
 def addBook():
     data = request.get_json()
     print(data)
